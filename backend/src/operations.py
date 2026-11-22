@@ -2,13 +2,12 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from . import checklist, coverage, workflow
+from . import callbacks, checklist, coverage, workflow
 from .db import audit
 from .schemas import AlertStatus, NewObservation
 
 # Demo operations policy. A created task retains the SLA of the confirmed alert version.
 RESPONSE_MINUTES = {3: 15, 2: 30, 1: 60}
-CALLBACK_MINUTES = {'no_answer': 30, 'requested_callback': 60}
 ACTIVE_RESPONSES = ('assigned', 'accepted')
 
 
@@ -69,28 +68,24 @@ def open_contact(db, alert_id, data, actor):
     return row
 
 
-def record_attempt(db, contact_id, data, actor):
-    contact = db.execute('SELECT status FROM family_contacts WHERE id=%s FOR UPDATE', (contact_id,)).fetchone()
-    if not contact:
-        raise HTTPException(404, '家属联络记录不存在')
+def record_attempt(db, contact_id, data, staff):
+    contact = callbacks.lock_contact(db, contact_id)
     if contact['status'] == 'reached':
         raise HTTPException(409, '联络事项已确认接通')
+    callbacks.sweep_expired(db, contact_id)
+    claim = callbacks.active_claim(db, contact_id)
+    if claim and claim['claimed_by'] != staff['id'] and staff['role'] != 'lead':
+        raise HTTPException(409, '该回拨已由值班长领取，请待领取超时后再登记')
     latest = db.execute('SELECT COALESCE(max(id),0) AS id FROM family_contact_attempts WHERE contact_id=%s', (contact_id,)).fetchone()
     if latest['id'] != data.expected_attempt_id:
         raise HTTPException(409, '已登记较新的联系记录，请刷新后再追加')
-    attempt = db.execute(
-        '''INSERT INTO family_contact_attempts(contact_id,recorded_by,channel,outcome,note)
-           VALUES (%s,%s,%s,%s,%s) RETURNING id''',
-        (contact_id, actor, data.channel, data.outcome, data.note),
-    ).fetchone()
-    minutes = CALLBACK_MINUTES.get(data.outcome)
-    result = db.execute(
-        '''UPDATE family_contacts SET status=%s, next_contact_at=now() + make_interval(mins => %s)
-           WHERE id=%s RETURNING *''',
-        ('reached' if minutes is None else 'callback', minutes, contact_id),
-    ).fetchone()
-    audit(db, actor, 'family_contact_attempt_recorded', 'family_contact', contact_id,
-          attempt_id=attempt['id'], outcome=data.outcome)
+    attempt_id, result = callbacks.apply_attempt(db, contact_id, staff['id'], data.channel, data.outcome, data.note)
+    if claim:
+        # The claim owner finishing directly closes the claim; a lead's direct
+        # registration supersedes it so the old appointment leaves the pool at once.
+        callbacks.finish_claim(db, claim, 'done' if claim['claimed_by'] == staff['id'] else 'superseded', attempt_id)
+    audit(db, staff['id'], 'family_contact_attempt_recorded', 'family_contact', contact_id,
+          attempt_id=attempt_id, outcome=data.outcome)
     return result
 
 

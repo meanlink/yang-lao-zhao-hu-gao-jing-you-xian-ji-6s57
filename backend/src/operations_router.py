@@ -69,8 +69,14 @@ def contacts(staff=Depends(current_staff), alert_id: int | None = None):
     with connect() as db:
         return db.execute(
             '''SELECT c.*,r.name AS resident_name,r.room, c.next_contact_at <= now() AS due,
+                      cl.id AS claim_id, cl.claimed_by, cl.expires_at AS claim_expires_at, cs.name AS claimer_name,
                       COALESCE(history.attempts,'[]'::jsonb) AS attempts
                FROM family_contacts c JOIN alerts a ON a.id=c.alert_id JOIN residents r ON r.id=a.resident_id
+               LEFT JOIN LATERAL (
+                   SELECT y.id, y.claimed_by, y.expires_at FROM callback_claims y
+                   WHERE y.contact_id=c.id AND y.status='active' AND y.expires_at > now()
+                   ORDER BY y.id DESC LIMIT 1
+               ) cl ON true LEFT JOIN staff cs ON cs.id=cl.claimed_by
                LEFT JOIN LATERAL (
                    SELECT jsonb_agg(jsonb_build_object('id', x.id,'channel',x.channel,'outcome',x.outcome,
                        'note',x.note,'attempted_at',x.attempted_at,'recorder',s.name) ORDER BY x.id DESC) AS attempts
@@ -91,7 +97,7 @@ def new_contact(alert_id: int, data: OpenContact, staff=Depends(lead)):
 @router.post('/family-contacts/{contact_id}/attempts', status_code=201)
 def contact_attempt(contact_id: int, data: RecordAttempt, staff=Depends(writers)):
     with connect() as db:
-        return operations.record_attempt(db, contact_id, data, staff['id'])
+        return operations.record_attempt(db, contact_id, data, staff)
 
 
 @router.get('/handover-followups')

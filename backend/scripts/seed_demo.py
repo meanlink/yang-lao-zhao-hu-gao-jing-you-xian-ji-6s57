@@ -4,6 +4,8 @@ from scripts.seed_coverage import seed_coverage_case
 
 from src.auth import hash_password
 from src.db import connect, migrate
+from src.operations import open_contact, record_attempt
+from src.operations_schemas import OpenContact, RecordAttempt
 from src.priority_model import PriorityModel
 from src.schemas import Handover, NewObservation, Review
 from src.workflow import dispatch, enter_observation, review, score_one
@@ -26,6 +28,23 @@ OBSERVATIONS = [
     ('OBS-DEMO-2071', 'ZH-207', (False, True, False, True), '巡视已完成。一小时内重复呼叫，物品整理任务仍等待回执。'),
     ('OBS-DEMO-3121', 'ZH-312', (False, False, False, False), '例行巡视已登记，未留未完成项目。'),
 ]
+
+
+def seed_callback_case(db, staff):
+    """Open one family contact with a due callback so the workbench starts non-empty."""
+    alert = db.execute(
+        """SELECT a.id FROM alerts a JOIN residents r ON r.id=a.resident_id
+           WHERE r.code='ZH-312' AND a.status='handover'""",
+    ).fetchone()
+    if not alert or db.execute('SELECT 1 FROM family_contacts WHERE alert_id=%s', (alert['id'],)).fetchone():
+        return
+    contact = open_contact(db, alert['id'], OpenContact(
+        contact_role='primary', purpose='核对 312-B 巡视回执，并确认家属是否知晓夜间呼叫记录。'), staff['lead'])
+    record_attempt(db, contact['id'], RecordAttempt(
+        expected_attempt_id=0, channel='phone', outcome='no_answer',
+        note='两次拨打均未接通，约定稍后回拨。'), {'id': staff['carer'], 'role': 'carer'})
+    db.execute("UPDATE family_contacts SET next_contact_at=now() - make_interval(mins => 5) WHERE id=%s",
+               (contact['id'],))
 
 
 def seed():
@@ -61,9 +80,11 @@ def seed():
                     dispatch(db, alert['id'], Handover(revision=alert['revision'], target_shift='night',
                                                        next_action='核对 312-B 例行巡视回执并登记。'), staff['lead'])
         seed_coverage_case(db, staff['lead'])
+        seed_callback_case(db, staff)
         return {table: db.execute(f'SELECT count(*) AS n FROM {table}').fetchone()['n']
                 for table in ('staff', 'residents', 'observations', 'alerts', 'handovers', 'audit_events',
-                              'shift_coverage', 'response_checklists', 'response_check_items', 'response_check_events')}
+                              'shift_coverage', 'response_checklists', 'response_check_items', 'response_check_events',
+                              'family_contacts', 'callback_claims')}
 
 
 if __name__ == '__main__':

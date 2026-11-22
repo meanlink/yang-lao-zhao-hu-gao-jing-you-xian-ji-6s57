@@ -72,13 +72,16 @@ export async function contactsPage(state, alertId) {
   const [items, alert] = await Promise.all([api(`/family-contacts${query('alert_id',alertId)}`), alertId ? api(`/alerts/${alertId}`) : null]);
   const rows = items.map(row => {
     const timeline = row.attempts.map(attempt => `<li><strong>${outcomes[attempt.outcome]}</strong><small>${channels[attempt.channel]} · ${escape(attempt.recorder)} · ${time(attempt.attempted_at)}</small><p>${escape(attempt.note)}</p></li>`).join('');
-    const form = ['carer','lead'].includes(state.user.role) && row.status !== 'reached' ? `<form class="stack ops-action" data-do="recordAttempt" data-id="${row.id}" data-attempt="${row.attempts[0]?.id || 0}">
+    const heldByOther = row.claim_id && row.claimed_by !== state.user.id;
+    const blocked = heldByOther && state.user.role !== 'lead';
+    const claimLine = row.claim_id ? `<p class="ops-time">领取人 ${escape(row.claimer_name)} · ${time(row.claim_expires_at)} 超时${heldByOther && state.user.role === 'lead' ? ' · 直接登记将作废旧领取' : ''}</p>` : '';
+    const form = ['carer','lead'].includes(state.user.role) && row.status !== 'reached' && !blocked ? `<form class="stack ops-action" data-do="recordAttempt" data-id="${row.id}" data-attempt="${row.attempts[0]?.id || 0}">
       <div class="ops-fields"><label>联络方式<select name="channel">${options(channels)}</select></label>
       <label>联系结果<select name="outcome">${options(outcomes)}</select></label></div>
       ${noteField('联络纪要','note','记录沟通结果及下一步')}${button('登记联系结果')}</form>` : '';
-    return item(row,pill(contacts[row.status],row.status === 'reached' ? 'good' : row.due ? 'warn' : 'neutral'),
+    return item(row,`${pill(contacts[row.status],row.status === 'reached' ? 'good' : row.due ? 'warn' : 'neutral')}${row.claim_id ? pill('已领取','warn') : ''}`,
       `${alertLink(row.alert_id)} · ${contactRoles[row.contact_role]}`,
-      `<p class="ops-copy">${escape(row.purpose)}</p>${row.next_contact_at ? `<p class="ops-time">${row.status === 'open' ? '首次联络' : '回拨时间'} ${time(row.next_contact_at)}</p>` : ''}
+      `<p class="ops-copy">${escape(row.purpose)}</p>${row.next_contact_at ? `<p class="ops-time">${row.status === 'open' ? '首次联络' : '回拨时间'} ${time(row.next_contact_at)}</p>` : ''}${claimLine}
        ${timeline ? `<ol class="ops-timeline" aria-label="联络轨迹">${timeline}</ol>` : ''}`,form);
   }).join('');
   const canOpen = alert && ['confirmed','handover','closed'].includes(alert.status) && state.user.role === 'lead' && !items.length;

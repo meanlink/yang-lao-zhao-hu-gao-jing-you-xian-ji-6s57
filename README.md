@@ -91,3 +91,13 @@ docker compose exec -T backend python -m scripts.seed_demo
 首次种子运行会为康复翼一层创建 115-A 沈慧芳的告警和唐宁的 8 小时覆盖。唐宁使用 `relief@zhaohui.local` 和 `zhaohui-demo` 登录。覆盖到期后，值班长可登记新班次。再次执行 seed 会保留既有班次和业务记录。未登记过覆盖的区域可继续使用原有派单流程，值班长可为任何在办响应添加核对清单。
 
 新增模型位于 `backend/migrations/003_shift_coverage.sql` 和 `004_response_checks.sql`。`coverage*.py`、`checklist*.py` 负责规则、请求校验及 API。原生前端的值班覆盖、可用人员选择和核对工作台分别由 `shiftCoverage.js`、`coverageDispatch.js`、`responseChecks.js` 和 `checklistItems.js` 提供。
+
+## 回拨领取工作台
+
+1. 家属未接通或约定回拨后，联络事项进入「回拨工作台」队列。队列展示最新预约（最近一次联系结果、登记人与纪要）、当前领取人和回拨到期时间。
+2. 值班长在到点的事项上点击「领取回拨」，获得 20 分钟领取时限。同一事项同一时刻至多一笔生效领取：两班同时提交时只有一笔办成，另一笔收到冲突提示。领取请求携带幂等标识，同一笔领取重试不会重复占用。
+3. 值班长仍可在「家属联络」直接登记接通或改约。登记后旧预约立即退出待领，该事项上生效中的领取随之作废。
+4. 领取人中断或超时未交回执，领取到期自动恢复待领，其他班组可重新领取。旧领取人迟交的回执会被拒绝，不能盖掉新结果。
+5. 预约与领取均保存在 PostgreSQL，服务重启后到期回拨照常出现在队列中。
+
+模型位于 `backend/migrations/005_callback_claims.sql`，规则、请求校验及 API 在 `backend/src/callbacks.py`、`callbacks_schemas.py`、`callbacks_router.py`，前端工作台为 `frontend/src/callbackWorkbench.js`。验收用例在 `backend/tests/test_callbacks.py`，以 `PGHOST` 等环境变量指向可用 PostgreSQL 后运行 `python -m pytest tests/test_callbacks.py`（用例会迁移并清空该库业务表）。

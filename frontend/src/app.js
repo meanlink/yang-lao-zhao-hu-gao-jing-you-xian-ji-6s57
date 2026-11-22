@@ -5,12 +5,13 @@ import {residentsPage} from './residents.js';
 import {observationsPage} from './observations.js';
 import {handoversPage} from './handovers.js';
 import {careOperationsActions, contactsPage, followupsPage, responsesPage} from './careOperations.js';
+import {callbackActions, callbacksPage} from './callbackWorkbench.js';
 import {coverageActions, shiftCoveragePage} from './shiftCoverage.js';
 import {checkActions, responseChecksPage} from './responseChecks.js';
 
 const app = document.querySelector('#app');
 const notice = document.querySelector('#notification');
-const routes = {alerts:['告警队列',alertsPage], residents:['住户档案',residentsPage], observations:['照护观察',observationsPage], handovers:['交班记录',handoversPage], responses:['照护响应',responsesPage], coverage:['值班覆盖',shiftCoveragePage], checks:['处置核对',responseChecksPage], contacts:['家属联络',contactsPage], followups:['交班后复查',followupsPage]};
+const routes = {alerts:['告警队列',alertsPage], residents:['住户档案',residentsPage], observations:['照护观察',observationsPage], handovers:['交班记录',handoversPage], responses:['照护响应',responsesPage], coverage:['值班覆盖',shiftCoveragePage], checks:['处置核对',responseChecksPage], contacts:['家属联络',contactsPage], callbacks:['回拨工作台',callbacksPage], followups:['交班后复查',followupsPage]};
 let noticeTimeout;
 
 function inform(message, failed=false) {
@@ -51,6 +52,7 @@ async function render() {
 
 const actions = {
   ...careOperationsActions,
+  ...callbackActions,
   ...coverageActions,
   ...checkActions,
   async login(_form, data) {
